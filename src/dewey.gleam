@@ -6,17 +6,16 @@ import gleam/json
 import gleam/result
 import gleam/time/timestamp.{type Timestamp}
 
-// ----- HELPER TYPES AND FNS -----
-pub type SendRequestFunction(user_error_type) =
-  fn(Request(String)) -> Result(Response(String), user_error_type)
+// ----- PUBLIC HELPER TYPES AND FNS -----
+pub type ParseResponseFunc(data_type) =
+  fn(Response(String)) -> Result(data_type, DeweyError)
 
-pub type Error(user_error_type) {
-  CustomError(user_error_type)
-  JSONDecodeError(json.DecodeError)
+pub type DeweyError {
+  JSONDecodeError(err: json.DecodeError)
 }
 
 // ----- CLIENT -----
-pub type Client {
+pub opaque type Client {
   Client(url: String, api_key: String)
 }
 
@@ -39,28 +38,25 @@ pub type Index {
 
 pub fn get_all_indexes(
   client: Client,
-  send_req: SendRequestFunction(user_error_type),
-) -> Result(List(Index), Error(user_error_type)) {
+) -> #(Request(String), ParseResponseFunc(List(Index))) {
   let url = client.url <> "/indexes"
-  let assert Ok(base_req) = request.to(url)
+  let req = base_request(url, client.api_key)
 
-  let req =
-    request.set_method(base_req, Get)
-    |> request.set_header("Authorization", "Bearer " <> client.api_key)
+  // Build response parser function
+  let parse_response = fn(response: Response(String)) -> Result(
+    List(Index),
+    DeweyError,
+  ) {
+    let decoder = {
+      use indexes <- decode.field("results", decode.list(index_decoder()))
+      decode.success(indexes)
+    }
 
-  let res =
-    send_req(req)
-    |> result.map_error(CustomError)
-
-  use resp <- result.try(res)
-
-  let decoder = {
-    use indexes <- decode.field("results", decode.list(index_decoder()))
-    decode.success(indexes)
+    json.parse(response.body, decoder)
+    |> result.map_error(JSONDecodeError)
   }
 
-  json.parse(resp.body, decoder)
-  |> result.map_error(JSONDecodeError)
+  #(req, parse_response)
 }
 
 // ------ DOCUMENTS -----
@@ -83,4 +79,11 @@ fn index_decoder() -> decode.Decoder(Index) {
     |> result.unwrap(timestamp.from_unix_seconds(0))
 
   decode.success(Index(uid:, created_at:, updated_at:, primary_key:))
+}
+
+// ----- PRIVATE HELPER TYPES AND FNS -----
+fn base_request(url: String, api_key: String) -> Request(String) {
+  let assert Ok(base_req) = request.to(url)
+
+  request.set_header(base_req, "Authorization", "Bearer " <> api_key)
 }
