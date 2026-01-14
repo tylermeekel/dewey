@@ -7,7 +7,7 @@ A Gleam Meilisearch API client.
 [![Package Version](https://img.shields.io/hexpm/v/dewey)](https://hex.pm/packages/dewey)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/dewey/)
 
-This package utilizes a ***sans-io*** approach, meaning http requests are handled by users implementing dewey, instead of dewey coming packaged with an API client. This makes it possible to use dewey across compile targets.
+This package utilizes a ***sans-io*** approach, meaning http requests are handled by users implementing dewey, instead of dewey coming packaged with an HTTP client. This makes it possible to use dewey across compile targets.
 
 
 To assist with ease of use, the package makes use of an "Operation" return type for most of its functions.
