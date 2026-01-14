@@ -1,6 +1,8 @@
 # dewey ☔
 
-A Gleam Meilisearch API client.
+A Gleam Meilisearch API client. 
+
+**Note: dewey is not finished, and is therefore not currently available on the hex repository.**
 
 [![Package Version](https://img.shields.io/hexpm/v/dewey)](https://hex.pm/packages/dewey)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/dewey/)
