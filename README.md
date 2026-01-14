@@ -46,9 +46,14 @@ Further documentation can be found at <https://hexdocs.pm/dewey>.
 ### Completed Features
 - Indexes
 - Documents
+- Tasks
+  - Most features completed
+
+### In Progress Features
+- Tasks
+  - Proper parsing of Settings Update task details
 
 ### Planned Features
-- Tasks
 - Search
 - Network
 - Similar Documents

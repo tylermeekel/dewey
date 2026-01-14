@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/http.{Delete, Get, Patch, Post, Put}
 import gleam/http/request.{type Request}
@@ -7,6 +8,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None}
 import gleam/result
+import gleam/string
+import gleam/time/duration
 import gleam/time/timestamp.{type Timestamp}
 
 // ----- PUBLIC HELPER TYPES AND FNS -----
@@ -63,16 +66,17 @@ pub type Task {
   Task(
     uid: Int,
     index_uid: Option(String),
+    batch_uid: Int,
     status: TaskStatus,
     task_type: TaskType,
     canceled_by: Option(Int),
-    details: TaskDetails,
+    details: Option(TaskDetails),
     error: Option(TaskError),
     // TODO: Figure out how to parse an ISO8601 duration
     // duration: duration.Duration,
     enqueued_at: timestamp.Timestamp,
-    started_at: timestamp.Timestamp,
-    finished_at: timestamp.Timestamp,
+    started_at: Option(timestamp.Timestamp),
+    finished_at: Option(timestamp.Timestamp),
   )
 }
 
@@ -97,6 +101,17 @@ fn string_to_task_status(str: String) -> TaskStatus {
     "failed" -> Failed
     "canceled" -> Canceled
     _ -> UnexpectedTaskStatus
+  }
+}
+
+fn task_status_to_string(status: TaskStatus) -> String {
+  case status {
+    Enqueued -> "enqueued"
+    Processing -> "processing"
+    Succeeded -> "succeeded"
+    Failed -> "failed"
+    Canceled -> "canceled"
+    UnexpectedTaskStatus -> ""
   }
 }
 
@@ -140,12 +155,218 @@ fn string_to_task_type(str: String) -> TaskType {
   }
 }
 
+fn task_type_to_string(task_type: TaskType) -> String {
+  case task_type {
+    IndexCreation -> "indexCreation"
+    IndexUpdate -> "indexUpdate"
+    IndexDeletion -> "indexDeletion"
+    IndexSwap -> "indexSwap"
+    DocumentAdditionOrUpdate -> "documentAdditionOrUpdate"
+    DocumentDeletion -> "documentDeletion"
+    SettingsUpdate -> "settingsUpdate"
+    DumpCreation -> "dumpCreation"
+    TaskCancelation -> "taskCancelation"
+    TaskDeletion -> "taskDeletion"
+    UpgradeDatabase -> "upgradeDatabase"
+    DocumentEdition -> "documentEdition"
+    SnapshotCreation -> "snapshotCreation"
+    UnexpectedTaskType -> ""
+  }
+}
+
 /// A record describing the details of a specific task.
-pub type TaskDetails
+pub type TaskDetails {
+  DocumentAdditionOrUpdateDetails(
+    received_documents: Int,
+    indexed_documents: Option(Int),
+  )
+  DocumentDeletionDetails(
+    provided_ids: Int,
+    original_filter: Option(String),
+    deleted_documents: Option(Int),
+  )
+  IndexCreationOrUpdateDetails(primary_key: Option(String))
+  IndexDeletionDetails(deleted_documents: Option(Int))
+  IndexSwapDetails(swaps: List(Swap))
+
+  // TODO: fully implement missing features
+  // missing: synonyms, typoTolerance, pagination, faceting, filterable_attributes
+  SettingsUpdateDetails(
+    ranking_rules: Option(List(String)),
+    distinct_attribute: Option(String),
+    searchable_attributes: Option(List(String)),
+    displayed_attributes: Option(List(String)),
+    sortable_attributes: Option(List(String)),
+    stop_words: Option(List(String)),
+  )
+  DumpCreationDetails(dump_uid: Option(String))
+  TaskCancelationDetails(
+    matched_tasks: Int,
+    canceled_tasks: Option(Int),
+    original_filter: String,
+  )
+  TaskDeletionDetails(
+    matched_tasks: Int,
+    deleted_tasks: Option(Int),
+    original_filter: String,
+  )
+}
 
 /// An error message that can accompany a failed task.
 pub type TaskError {
   TaskError(message: String, code: String, error_type: String, link: String)
+}
+
+pub type TasksParam {
+  TasksByUIDs(List(Int))
+  TasksByBatchUIDs(List(Int))
+  TasksByStatuses(List(TaskStatus))
+  TasksByTypes(List(TaskType))
+  TasksByIndexUIDs(List(String))
+  TasksLimit(Int)
+  TasksFromTaskUID(Int)
+  TasksInReverse(Bool)
+  TasksBeforeEnqueuedAt(timestamp.Timestamp)
+  TasksAfterEnqueuedAt(timestamp.Timestamp)
+  TasksBeforeStartedAt(timestamp.Timestamp)
+  TasksAfterStartedAt(timestamp.Timestamp)
+  TasksBeforeFinishedAt(timestamp.Timestamp)
+  TasksAfterFinishedAt(timestamp.Timestamp)
+}
+
+fn tasks_param_to_tuple(param: TasksParam) -> #(String, String) {
+  case param {
+    TasksByUIDs(uids) -> {
+      let uids = list.map(uids, int.to_string)
+
+      #("uids", string.join(uids, ","))
+    }
+    TasksByBatchUIDs(batch_uids) -> {
+      let batch_uids = list.map(batch_uids, int.to_string)
+
+      #("batchUids", string.join(batch_uids, ","))
+    }
+    TasksByStatuses(statuses) -> {
+      let statuses = list.map(statuses, task_status_to_string)
+
+      #("statuses", string.join(statuses, ","))
+    }
+    TasksByTypes(types) -> {
+      let types = list.map(types, task_type_to_string)
+
+      #("types", string.join(types, ","))
+    }
+    TasksByIndexUIDs(index_uids) -> #("indexUids", string.join(index_uids, ","))
+    TasksLimit(limit) -> #("limit", int.to_string(limit))
+    TasksFromTaskUID(from_uid) -> #("from", int.to_string(from_uid))
+    TasksInReverse(reverse) -> #(
+      "reverse",
+      string.lowercase(bool.to_string(reverse)),
+    )
+    TasksBeforeEnqueuedAt(before_enqueued_at) -> #(
+      "beforeEnqueuedAt",
+      timestamp.to_rfc3339(before_enqueued_at, duration.seconds(0)),
+    )
+    TasksAfterEnqueuedAt(after_enqueued_at) -> #(
+      "afterEnqueuedAt",
+      timestamp.to_rfc3339(after_enqueued_at, duration.seconds(0)),
+    )
+    TasksBeforeStartedAt(before_started_at) -> #(
+      "beforeStartedAt",
+      timestamp.to_rfc3339(before_started_at, duration.seconds(0)),
+    )
+    TasksAfterStartedAt(after_started_at) -> #(
+      "afterStartedAt",
+      timestamp.to_rfc3339(after_started_at, duration.seconds(0)),
+    )
+    TasksBeforeFinishedAt(before_finished_at) -> #(
+      "beforeFinishedAt",
+      timestamp.to_rfc3339(before_finished_at, duration.seconds(0)),
+    )
+    TasksAfterFinishedAt(after_finished_at) -> #(
+      "afterFinishedAt",
+      timestamp.to_rfc3339(after_finished_at, duration.seconds(0)),
+    )
+  }
+}
+
+pub fn get_tasks(
+  client: Client,
+  params: List(TasksParam),
+) -> Operation(List(Task)) {
+  let url = client.url <> "/tasks"
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Get)
+    |> request.set_query(list.map(params, tasks_param_to_tuple))
+
+  #(req, fn(resp: Response(String)) -> Result(List(Task), DeweyError) {
+    use resp_body <- result.try(verify_response(resp))
+
+    let decoder = {
+      use results <- decode.field("results", decode.list(task_decoder()))
+
+      decode.success(results)
+    }
+
+    json.parse(resp_body, decoder)
+    |> result.map_error(JSONDecodeError)
+  })
+}
+
+pub fn get_one_task(client: Client, task_uid: Int) -> Operation(Task) {
+  let url = client.url <> "/tasks/" <> int.to_string(task_uid)
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Get)
+
+  #(req, fn(resp: Response(String)) -> Result(Task, DeweyError) {
+    use resp_body <- result.try(verify_response(resp))
+
+    json.parse(resp_body, task_decoder())
+    |> result.map_error(JSONDecodeError)
+  })
+}
+
+pub fn cancel_tasks(
+  client: Client,
+  params: List(TasksParam),
+) -> Operation(SummarizedTask) {
+  let url = client.url <> "/tasks/cancel"
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Post)
+    |> request.set_query(list.map(params, tasks_param_to_tuple))
+
+  #(req, parse_summarized_task_response)
+}
+
+pub fn delete_tasks(
+  client: Client,
+  params: List(TasksParam),
+) -> Operation(SummarizedTask) {
+  let url = client.url <> "/tasks"
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Delete)
+    |> request.set_query(list.map(params, tasks_param_to_tuple))
+
+  #(req, parse_summarized_task_response)
+}
+
+pub fn delete_all_tasks(client: Client) -> Operation(SummarizedTask) {
+  let url = client.url <> "/tasks"
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Delete)
+    |> request.set_query([#("statuses", "failed,canceled,succeeded")])
+
+  #(req, parse_summarized_task_response)
 }
 
 // ----- INDEXES -----
@@ -593,7 +814,9 @@ fn summarized_task_decoder() -> decode.Decoder(SummarizedTask) {
 
   // This should never fail, as the API should always return an RFC3339 string
   // https://www.meilisearch.com/docs/reference/api/tasks#enqueuedat
-  let assert Ok(enqueued_at) = timestamp.parse_rfc3339(enqueued_at_str)
+  let enqueued_at =
+    timestamp.parse_rfc3339(enqueued_at_str)
+    |> result.unwrap(timestamp.from_unix_seconds(0))
 
   decode.success(SummarizedTask(
     task_uid:,
@@ -619,6 +842,247 @@ fn index_decoder() -> decode.Decoder(Index) {
     |> result.unwrap(timestamp.from_unix_seconds(0))
 
   decode.success(Index(uid:, created_at:, updated_at:, primary_key:))
+}
+
+fn task_decoder() -> decode.Decoder(Task) {
+  use uid <- decode.field("uid", decode.int)
+  use batch_uid <- decode.field("batchUid", decode.int)
+  use index_uid <- decode.field("indexUid", decode.optional(decode.string))
+  use status_string <- decode.field("status", decode.string)
+  use task_type_string <- decode.field("type", decode.string)
+  use canceled_by <- decode.field("canceledBy", decode.optional(decode.int))
+  use details <- decode.field("details", task_details_decoder())
+  use error <- decode.field("error", decode.optional(task_error_decoder()))
+  use enqueued_at_string <- decode.field("enqueuedAt", decode.string)
+  use started_at_string <- decode.field(
+    "startedAt",
+    decode.optional(decode.string),
+  )
+  use finished_at_string <- decode.field(
+    "finishedAt",
+    decode.optional(decode.string),
+  )
+
+  let status = string_to_task_status(status_string)
+  let task_type = string_to_task_type(task_type_string)
+
+  let default_time = timestamp.from_unix_seconds(0)
+
+  let enqueued_at =
+    timestamp.parse_rfc3339(enqueued_at_string)
+    |> result.unwrap(default_time)
+
+  let started_at =
+    option.map(started_at_string, fn(str) {
+      timestamp.parse_rfc3339(str)
+      |> result.unwrap(default_time)
+    })
+
+  let finished_at =
+    option.map(finished_at_string, fn(str) {
+      timestamp.parse_rfc3339(str)
+      |> result.unwrap(default_time)
+    })
+
+  decode.success(Task(
+    uid:,
+    batch_uid:,
+    index_uid:,
+    status:,
+    task_type:,
+    canceled_by:,
+    details:,
+    error:,
+    enqueued_at:,
+    started_at:,
+    finished_at:,
+  ))
+}
+
+pub type Swap {
+  Swap(swapped_indexes: #(String, String), rename: Bool)
+}
+
+fn task_details_decoder() -> decode.Decoder(Option(TaskDetails)) {
+  let document_addition_or_update = {
+    use received_documents <- decode.field("receivedDocuments", decode.int)
+    use indexed_documents <- decode.field(
+      "indexedDocuments",
+      decode.optional(decode.int),
+    )
+    decode.success(DocumentAdditionOrUpdateDetails(
+      received_documents:,
+      indexed_documents:,
+    ))
+  }
+
+  let document_deletion = {
+    use provided_ids <- decode.field("providedIds", decode.int)
+    use original_filter <- decode.field(
+      "originalFilter",
+      decode.optional(decode.string),
+    )
+    use deleted_documents <- decode.field(
+      "deletedDocuments",
+      decode.optional(decode.int),
+    )
+
+    decode.success(DocumentDeletionDetails(
+      provided_ids:,
+      original_filter:,
+      deleted_documents:,
+    ))
+  }
+
+  let index_creation_or_update = {
+    use primary_key <- decode.field(
+      "primaryKey",
+      decode.optional(decode.string),
+    )
+
+    decode.success(IndexCreationOrUpdateDetails(primary_key:))
+  }
+
+  let index_deletion = {
+    use deleted_documents <- decode.field(
+      "deletedDocuments",
+      decode.optional(decode.int),
+    )
+
+    decode.success(IndexDeletionDetails(deleted_documents:))
+  }
+
+  let index_swap = {
+    let swap_decoder = {
+      use indexes <- decode.field("indexes", decode.list(decode.string))
+      use rename <- decode.field("rename", decode.bool)
+
+      case indexes {
+        [first_index, second_index] -> {
+          decode.success(Swap(
+            swapped_indexes: #(first_index, second_index),
+            rename:,
+          ))
+        }
+        _ -> decode.failure(Swap(#("", ""), False), "Swap")
+      }
+    }
+
+    use swaps <- decode.field("swaps", decode.list(swap_decoder))
+    decode.success(IndexSwapDetails(swaps:))
+  }
+
+  // SettingsUpdateDetails(
+  //   ranking_rules: Option(List(String)),
+  //   filterable_attributes: Option(List(String)),
+  //   distinct_attribute: Option(String),
+  //   searchable_attributes: Option(List(String)),
+  //   displayed_attributes: Option(List(String)),
+  //   sortable_attributes: Option(List(String)),
+  //   stop_words: Option(List(String)),
+  // )
+
+  let optional_string_list = decode.optional(decode.list(decode.string))
+
+  let settings_update = {
+    use ranking_rules <- decode.optional_field(
+      "rankingRules",
+      None,
+      optional_string_list,
+    )
+    use distinct_attribute <- decode.optional_field(
+      "distinctAttribute",
+      None,
+      decode.optional(decode.string),
+    )
+    use searchable_attributes <- decode.optional_field(
+      "searchableAttributes",
+      None,
+      optional_string_list,
+    )
+    use displayed_attributes <- decode.optional_field(
+      "displayedAttributes",
+      None,
+      optional_string_list,
+    )
+    use sortable_attributes <- decode.optional_field(
+      "sortableAttributes",
+      None,
+      optional_string_list,
+    )
+    use stop_words <- decode.optional_field(
+      "stopWords",
+      None,
+      optional_string_list,
+    )
+
+    decode.success(SettingsUpdateDetails(
+      ranking_rules:,
+      distinct_attribute:,
+      searchable_attributes:,
+      displayed_attributes:,
+      sortable_attributes:,
+      stop_words:,
+    ))
+  }
+
+  let dump_creation = {
+    use dump_uid <- decode.field("dumpUid", decode.optional(decode.string))
+
+    decode.success(DumpCreationDetails(dump_uid:))
+  }
+
+  let task_cancelation = {
+    use matched_tasks <- decode.field("matchedTasks", decode.int)
+    use canceled_tasks <- decode.field(
+      "canceledTasks",
+      decode.optional(decode.int),
+    )
+    use original_filter <- decode.field("originalFilter", decode.string)
+
+    decode.success(TaskCancelationDetails(
+      matched_tasks:,
+      canceled_tasks:,
+      original_filter:,
+    ))
+  }
+
+  let task_deletion = {
+    use matched_tasks <- decode.field("matchedTasks", decode.int)
+    use deleted_tasks <- decode.field(
+      "deletedTasks",
+      decode.optional(decode.int),
+    )
+    use original_filter <- decode.field("originalFilter", decode.string)
+
+    decode.success(TaskDeletionDetails(
+      matched_tasks:,
+      deleted_tasks:,
+      original_filter:,
+    ))
+  }
+
+  decode.optional(
+    decode.one_of(settings_update, [
+      document_deletion,
+      index_creation_or_update,
+      index_deletion,
+      index_swap,
+      document_addition_or_update,
+      dump_creation,
+      task_cancelation,
+      task_deletion,
+    ]),
+  )
+}
+
+fn task_error_decoder() -> decode.Decoder(TaskError) {
+  use message <- decode.field("message", decode.string)
+  use code <- decode.field("code", decode.string)
+  use error_type <- decode.field("type", decode.string)
+  use link <- decode.field("link", decode.string)
+
+  decode.success(TaskError(message:, code:, error_type:, link:))
 }
 
 // ----- PRIVATE HELPER TYPES AND FNS -----
