@@ -921,13 +921,16 @@ pub type SearchResponse(document_type) {
   )
 }
 
+/// Returns an Operation record for the Search endpoint
+/// 
+/// This endpoint is outlined at: https://www.meilisearch.com/docs/reference/api/search#search-in-an-index-with-post
 pub fn search(
   client: Client,
   index_uid: String,
   query: String,
   document_decoder: decode.Decoder(document_type),
   params: List(SearchParam),
-) {
+) -> Operation(SearchResponse(document_type)) {
   let url = client.url <> "/indexes/" <> index_uid <> "/search"
 
   let param_fields = [
