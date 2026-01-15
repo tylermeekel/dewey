@@ -48,13 +48,16 @@ Further documentation can be found at <https://hexdocs.pm/dewey>.
 - Documents
 - Tasks
   - Most features completed
+- Search
+  - Most features completed
 
 ### In Progress Features
 - Tasks
   - Proper parsing of Settings Update task details
+- Search
+  - Final search parameters
 
 ### Planned Features
-- Search
 - Network
 - Similar Documents
 - Facet search

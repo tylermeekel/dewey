@@ -801,6 +801,203 @@ pub fn delete_documents_by_batch(
 
 // ----- SEARCH -----
 
+/// Collection of Search Parameter records for adjusting the search functionality.
+/// 
+/// Keep in mind that some of these parameters change the structure of the documents returned.
+/// You will have to adjust your document decoder function to account for the changes caused.
+/// For this reason, it is important to read through the search API documentation to understand
+/// how each parameter can affect the document return type.
+/// 
+/// For more details visit this link: https://www.meilisearch.com/docs/reference/api/search#search-parameters
+pub type SearchParam {
+  SearchOffset(offset: Int)
+  SearchLimit(limit: Int)
+  SearchHitsPerPage(hits: Int)
+  SearchPage(page_num: Int)
+  SearchFilter(filter: String)
+  // TODO: SearchFacets(facets: String)
+  SearchDistinctAttribute(attribute: String)
+  SearchAttributesToRetrieve(attributes: List(String))
+  SearchAttributesToCrop(attributes: List(String))
+  SearchCropLength(length: Int)
+  SearchCropMarker(marker: String)
+  SearchAttributesToHighlight(attributes: List(String))
+  SearchHighlightPreTag(pre_tag: String)
+  SearchHighlighPostTag(post_tag: String)
+  SearchShowMatchesPosition(show_matches_position: Bool)
+  SearchSortAttributes(attributes: List(String))
+  SearchMatchingStrategy(strategy: String)
+  SearchShowRankingScore(show_ranking_score: Bool)
+  SearchShowRankingScoreDetails(show_ranking_score_details: Bool)
+  SearchRankingScoreThreshold(threshold: Float)
+  SearchAttributesToSearchOn(attributes: List(String))
+  // TODO: SearchHybrid
+  SearchVector(vector: List(Float))
+  SearchRetrieveVectors(retrieve_vectors: Bool)
+  SearchLocales(locales: List(String))
+  // TODO: SearchMedia
+  // TODO: SearchPersonalize
+}
+
+fn search_param_to_json_field(param: SearchParam) -> #(String, json.Json) {
+  case param {
+    SearchOffset(offset:) -> #("offset", json.int(offset))
+    SearchLimit(limit:) -> #("limit", json.int(limit))
+    SearchHitsPerPage(hits:) -> #("hitsPerPage", json.int(hits))
+    SearchPage(page_num:) -> #("page", json.int(page_num))
+    SearchFilter(filter:) -> #("filter", json.string(filter))
+    SearchDistinctAttribute(attribute:) -> #("distinct", json.string(attribute))
+    SearchAttributesToRetrieve(attributes:) -> #(
+      "attributesToRetrieve",
+      json.array(attributes, json.string),
+    )
+    SearchAttributesToCrop(attributes:) -> #(
+      "attributesToCrop",
+      json.array(attributes, json.string),
+    )
+    SearchCropLength(length:) -> #("cropLength", json.int(length))
+    SearchCropMarker(marker:) -> #("cropMarker", json.string(marker))
+    SearchAttributesToHighlight(attributes:) -> #(
+      "attributesToHighlight",
+      json.array(attributes, json.string),
+    )
+    SearchHighlightPreTag(pre_tag:) -> #(
+      "highlightPreTag",
+      json.string(pre_tag),
+    )
+    SearchHighlighPostTag(post_tag:) -> #(
+      "highlightPostTag",
+      json.string(post_tag),
+    )
+    SearchShowMatchesPosition(show_matches_position:) -> #(
+      "showMatchesPosition",
+      json.bool(show_matches_position),
+    )
+    SearchSortAttributes(attributes:) -> #(
+      "sort",
+      json.array(attributes, json.string),
+    )
+    SearchMatchingStrategy(strategy:) -> #(
+      "matchingStrategy",
+      json.string(strategy),
+    )
+    SearchShowRankingScore(show_ranking_score:) -> #(
+      "showRankingScore",
+      json.bool(show_ranking_score),
+    )
+    SearchShowRankingScoreDetails(show_ranking_score_details:) -> #(
+      "showRankingScoreDetails",
+      json.bool(show_ranking_score_details),
+    )
+    SearchRankingScoreThreshold(threshold:) -> #(
+      "rankingScoreThreshold",
+      json.float(threshold),
+    )
+    SearchAttributesToSearchOn(attributes:) -> #(
+      "attributesToSearchOn",
+      json.array(attributes, json.string),
+    )
+    SearchVector(vector:) -> #("vector", json.array(vector, json.float))
+    SearchRetrieveVectors(retrieve_vectors:) -> #(
+      "retrieveVectors",
+      json.bool(retrieve_vectors),
+    )
+    SearchLocales(locales:) -> #("locales", json.array(locales, json.string))
+  }
+}
+
+pub type SearchResponse(document_type) {
+  SearchResponse(
+    hits: List(document_type),
+    offset: Int,
+    limit: Int,
+    estimated_total_hits: Option(Int),
+    total_hits: Option(Int),
+    total_pages: Option(Int),
+    hits_per_page: Option(Int),
+    processing_time_ms: Int,
+    query: String,
+    request_uid: String,
+  )
+}
+
+pub fn search(
+  client: Client,
+  index_uid: String,
+  query: String,
+  document_decoder: decode.Decoder(document_type),
+  params: List(SearchParam),
+) {
+  let url = client.url <> "/indexes/" <> index_uid <> "/search"
+
+  let param_fields = [
+    #("q", json.string(query)),
+    ..list.map(params, search_param_to_json_field)
+  ]
+
+  let req_body =
+    json.object(param_fields)
+    |> json.to_string
+
+  let req =
+    base_request(url, client.api_key)
+    |> request.set_method(Post)
+    |> request.set_header("Content-Type", "application/json")
+    |> request.set_body(req_body)
+
+  #(req, fn(resp: Response(String)) -> Result(
+    SearchResponse(document_type),
+    DeweyError,
+  ) {
+    use resp_body <- result.try(verify_response(resp))
+
+    let decoder = {
+      use hits <- decode.field("hits", decode.list(document_decoder))
+      use offset <- decode.field("offset", decode.int)
+      use limit <- decode.field("limit", decode.int)
+      use estimated_total_hits <- decode.optional_field(
+        "estimatedTotalHits",
+        None,
+        decode.optional(decode.int),
+      )
+      use total_hits <- decode.optional_field(
+        "totalHits",
+        None,
+        decode.optional(decode.int),
+      )
+      use total_pages <- decode.optional_field(
+        "totalPages",
+        None,
+        decode.optional(decode.int),
+      )
+      use hits_per_page <- decode.optional_field(
+        "hitsPerPage",
+        None,
+        decode.optional(decode.int),
+      )
+      use processing_time_ms <- decode.field("processingTimeMs", decode.int)
+      use query <- decode.field("query", decode.string)
+      use request_uid <- decode.field("requestUid", decode.string)
+
+      decode.success(SearchResponse(
+        hits:,
+        offset:,
+        limit:,
+        estimated_total_hits:,
+        total_hits:,
+        total_pages:,
+        hits_per_page:,
+        processing_time_ms:,
+        query:,
+        request_uid:,
+      ))
+    }
+
+    json.parse(resp_body, decoder)
+    |> result.map_error(JSONDecodeError)
+  })
+}
+
 // ----- DECODERS -----
 fn summarized_task_decoder() -> decode.Decoder(SummarizedTask) {
   use task_uid <- decode.field("taskUid", decode.int)
@@ -971,16 +1168,6 @@ fn task_details_decoder() -> decode.Decoder(Option(TaskDetails)) {
     use swaps <- decode.field("swaps", decode.list(swap_decoder))
     decode.success(IndexSwapDetails(swaps:))
   }
-
-  // SettingsUpdateDetails(
-  //   ranking_rules: Option(List(String)),
-  //   filterable_attributes: Option(List(String)),
-  //   distinct_attribute: Option(String),
-  //   searchable_attributes: Option(List(String)),
-  //   displayed_attributes: Option(List(String)),
-  //   sortable_attributes: Option(List(String)),
-  //   stop_words: Option(List(String)),
-  // )
 
   let optional_string_list = decode.optional(decode.list(decode.string))
 
