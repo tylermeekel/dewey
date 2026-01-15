@@ -2,7 +2,7 @@
 
 A Gleam Meilisearch API client. 
 
-**Note: dewey is not finished, and is therefore not currently available on the hex repository.**
+**Note: dewey has not reached version 1.0.0, and is therefore subject to breaking changes. Using this library before the 1.0.0 release means that you understand this message, and are willing to accept any breaking changes that may come.**
 
 [![Package Version](https://img.shields.io/hexpm/v/dewey)](https://hex.pm/packages/dewey)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/dewey/)
